@@ -1,0 +1,9 @@
+{
+  "files": [
+    {
+      "pattern": "infrastructure/packagedReport-(*).template",
+      "target": "cloudformation-local/advanced/cloudhr-presales/packagedReport-{1}.template",
+      "recursive": "false"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+name: CI
+on:
+  push:
+    paths-ignore:
+      - '.github/workflows/*'
+env:
+  PUBLISH: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    if: github.ref != 'refs/heads/master'
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@v2
+      - name: Validate stacks
+        run: |
+          for f in $(find ./infrastructure -name '*.yml'); do aws cloudformation validate-template --template-body "file://$f" --region eu-west-2; done
+
+  version:
+    runs-on: ubuntu-latest    
+    steps:
+    - uses: actions/checkout@master
+    - name: init
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git remote set-url origin https://build.svc:${GITHUB_TOKEN}@github.com/advancedcsg/cloudhr-multi-tenant.git
+        git checkout "$(echo ${{ github.ref }} | sed -E 's|refs/[a-zA-Z]+/||')"
+        git remote -v
+        git fetch
+        git config --global user.email octobot@github.com
+        git config --global user.name GitHub Actions
+        npm ci
+        npx lerna bootstrap --ci
+    - name: versioning
+      continue-on-error: true
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        BRANCH_NAME: master
+      run: |
+        npx lerna version --conventional-commits --yes
+
+  build:
+    runs-on: ubuntu-latest  
+    steps:
+    - uses: actions/checkout@master
+    - name: init
+      run: | 
+        npx lerna bootstrap --ci
+    - name: variables
+      id: vars
+      run: |
+        git fetch --depth=1 origin +refs/tags/*:refs/tags/*
+        echo ::set-env name=VERSION::$(git describe --tags $(git rev-list --tags --max-count=1))
+    - name: package sam template
+      uses: advancedcsg-open/action-aws-sam@master
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      with:
+        args: package --template-file infrastructure/template.yml --output-template-file infrastructure/packagedReport-$VERSION.template --s3-bucket advanced-artefacts-london --s3-prefix internal/cloudhrmt/sam/step-func-packages --region eu-west-2
+    - name: publish
+      uses: advancedcsg-open/action-jfrog-cli@v1.0.2
+      with:
+        url: https://advancedcsg.jfrog.io/advancedcsg
+        credentials type: apikey
+        apikey: ${{ secrets.ARTIFACTORY_API_KEY }}
+        args: 'u --spec=rt-upload-spec.json'
+    - name: Publish to s3
+      env:
+        AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      run: |
+        aws s3 cp infrastructure/packagedReport-$VERSION.template s3://advanced-artefacts-london/internal/cloudhrmt/sam/sam-template/ --region eu-west-2
