@@ -1,4 +1,4 @@
-name: MasterDeployCI
+name: CI
 on:
   push:
     branches:
@@ -9,7 +9,15 @@ jobs:
     steps:
     - uses: actions/checkout@v1
     - name: Zip Folder
-      run: zip -r hello-world.zip . -x ".git/*" ".github/*"
+      run: |
+        cd /home/runner/work/hello-world/hello-world" 
+        zip -r hello-world.zip . -x ".git/*" ".github/*"
 
-    - name: Release to Github
-      run: echo "Release"
+      - name: Congiguring jFrog CLI...
+        uses: jfrog/setup-jfrog-cli@v1
+        env:
+          JF_ARTIFACTORY_1: ${{ secrets.JF_ARTIFACTORY_ADVANCEDCSG }}
+
+      - name: publishing to jfrog artifactory...
+        run: |
+          jfrog rt u hello-world.zip cloudformation-local/advanced/edu-ops-new/api/hello-world.zip
